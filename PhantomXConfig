@@ -1,0 +1,198 @@
+local ConfigSystem = {}
+
+function ConfigSystem.Setup(opts)
+    opts = opts or {}
+    local Window = opts.Window
+    local ConfigTab = opts.ConfigTab
+    local CfgElements = opts.CfgElements or {}
+    local T = opts.T or function(k) return k end
+    local WindUI = opts.WindUI
+    local Lang = opts.SelectedLanguage or "English"
+    local DefaultConfigName = opts.DefaultConfigName or "PhantomX"
+
+    local function isArabic()
+        return Lang == "Arabic"
+    end
+
+    local function L(ar, en)
+        return isArabic() and ar or en
+    end
+
+    if not Window or not ConfigTab or not WindUI then
+        warn("[PhantomXConfig] Missing required params (Window/ConfigTab/WindUI)")
+        return
+    end
+
+    ConfigTab:Paragraph({
+        Title = T("configManagerTitle") ~= "configManagerTitle" and T("configManagerTitle") or L("مدير الإعدادات", "Config Manager"),
+        Desc = T("configManagerDesc") ~= "configManagerDesc" and T("configManagerDesc") or L(
+            "احفظ كل إعداداتك الحالية باسم مخصص، أو حمّل/احذف كونفيج سابق.",
+            "Save all your current settings under a custom name, or load/delete a previous config."
+        ),
+        Image = "save",
+        ImageSize = 28
+    })
+
+    local ConfigManager = Window.ConfigManager
+    local CurrentConfigName = DefaultConfigName
+
+    if not ConfigManager then
+        ConfigTab:Paragraph({
+            Title = L("مدير الإعدادات غير متوفر", "Config Manager Not Available"),
+            Desc = L("هذه الميزة تحتاج ConfigManager من WindUI", "This feature requires WindUI's ConfigManager"),
+            Image = "alert-triangle",
+            ImageSize = 24
+        })
+        return
+    end
+
+    pcall(function() ConfigManager:Init(Window) end)
+
+    local ConfigNameInput = ConfigTab:Input({
+        Flag = "ConfigNameInput",
+        Title = L("اسم الإعدادات", "Config Name"),
+        Desc = L("اسم الكونفيج الجديد أو المراد تعديله", "Name for the new or existing config"),
+        Value = CurrentConfigName,
+        Placeholder = DefaultConfigName,
+        Size = "xlarge",
+        Callback = function(value)
+            if value and value ~= "" then CurrentConfigName = value end
+        end
+    })
+
+    local AllConfigsDropdown
+    AllConfigsDropdown = ConfigTab:Dropdown({
+        Title = L("الإعدادات المحفوظة", "Saved Configs"),
+        Desc = L("اختر من الكونفيجات المحفوظة مسبقًا", "Pick from previously saved configs"),
+        Values = ConfigManager:AllConfigs(),
+        Value = nil,
+        AllowNone = true,
+        Size = "xlarge",
+        Callback = function(value)
+            if value then
+                CurrentConfigName = value
+                pcall(function() ConfigNameInput:Set(value) end)
+            end
+        end
+    })
+
+    local function RegisterAllElements(Config)
+        for flagName, element in pairs(CfgElements) do
+            pcall(function() Config:Register(flagName, element) end)
+        end
+    end
+
+    ConfigTab:Space({ Columns = 3 })
+
+    ConfigTab:Button({
+        Title = L("حفظ الإعدادات", "Save Config"),
+        Icon = "save",
+        Size = "xlarge",
+        Callback = function()
+            local nameToSave = (CurrentConfigName ~= "" and CurrentConfigName) or DefaultConfigName
+            local ok = pcall(function()
+                local Config = ConfigManager:CreateConfig(nameToSave)
+                RegisterAllElements(Config)
+                Config:Save()
+            end)
+            if ok then
+                WindUI:Notify({
+                    Title = T("notification"),
+                    Content = L("تم حفظ الإعدادات '", "Saved config '") .. nameToSave .. "'",
+                    Duration = 3
+                })
+                pcall(function() AllConfigsDropdown:Refresh(ConfigManager:AllConfigs()) end)
+            else
+                WindUI:Notify({
+                    Title = L("خطأ", "Error"),
+                    Content = L("فشل حفظ الإعدادات", "Failed to save config"),
+                    Duration = 3
+                })
+            end
+        end
+    })
+
+    ConfigTab:Button({
+        Title = L("تحميل الإعدادات", "Load Config"),
+        Icon = "refresh-cw",
+        Size = "xlarge",
+        Callback = function()
+            local nameToLoad = (CurrentConfigName ~= "" and CurrentConfigName) or DefaultConfigName
+            local ok, loaded = pcall(function()
+                local Config = ConfigManager:CreateConfig(nameToLoad)
+                RegisterAllElements(Config)
+                return Config:Load()
+            end)
+            if ok and loaded then
+                WindUI:Notify({
+                    Title = T("notification"),
+                    Content = L("تم تحميل الإعدادات '", "Loaded config '") .. nameToLoad .. "'",
+                    Duration = 3
+                })
+            else
+                WindUI:Notify({
+                    Title = L("فشل التحميل", "Load Failed"),
+                    Content = L("الإعدادات '", "Config '") .. nameToLoad .. L("' غير موجودة", "' not found"),
+                    Duration = 3
+                })
+            end
+        end
+    })
+
+    ConfigTab:Button({
+        Title = L("حذف الإعدادات", "Delete Config"),
+        Icon = "trash",
+        Size = "xlarge",
+        Callback = function()
+            local nameToDelete = (CurrentConfigName ~= "" and CurrentConfigName) or DefaultConfigName
+            local ok = pcall(function()
+                local Config = ConfigManager:CreateConfig(nameToDelete)
+                Config:Delete()
+            end)
+            if ok then
+                WindUI:Notify({
+                    Title = T("notification"),
+                    Content = L("تم حذف الإعدادات '", "Deleted config '") .. nameToDelete .. "'",
+                    Duration = 3
+                })
+                pcall(function() AllConfigsDropdown:Refresh(ConfigManager:AllConfigs()) end)
+            else
+                WindUI:Notify({
+                    Title = L("خطأ", "Error"),
+                    Content = L("فشل حذف الإعدادات", "Failed to delete config"),
+                    Duration = 3
+                })
+            end
+        end
+    })
+
+    ConfigTab:Space()
+
+    ConfigTab:Toggle({
+        Flag = "AutoLoadConfigToggle",
+        Title = L("تحميل تلقائي عند البدء", "Auto-Load On Startup"),
+        Desc = L(
+            "يحمّل هذا الاسم من الكونفيج تلقائيًا عند فتح اللعبة",
+            "Automatically load this config name when the game starts"
+        ),
+        Value = false,
+        Size = "xlarge",
+        Callback = function(state)
+            _G.PhantomXAutoLoadConfig = state
+            _G.PhantomXAutoLoadConfigName = CurrentConfigName
+        end
+    })
+
+    task.spawn(function()
+        task.wait(1)
+        if _G.PhantomXAutoLoadConfig and _G.PhantomXAutoLoadConfigName then
+            pcall(function()
+                local Config = ConfigManager:CreateConfig(_G.PhantomXAutoLoadConfigName)
+                RegisterAllElements(Config)
+                Config:Load()
+            end)
+        end
+    end)
+end
+
+return ConfigSystem
